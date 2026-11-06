@@ -210,8 +210,9 @@ p.note {{ color: #555; font-size: 0.9rem; }}
             e = int.from_bytes(base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)), "big")
             pub = RSAPublicNumbers(e, n).public_key(default_backend())
             pem = pub.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode()
-            claims = jwt.decode(id_token, pem, algorithms=["RS256"], audience=self.google_client_id, issuer=GOOGLE_ISSUER)
-        except JWTError:
+            claims = jwt.decode(id_token, pem, algorithms=["RS256"], audience=self.google_client_id, issuer=GOOGLE_ISSUER, options={"verify_at_hash": False})
+        except JWTError as ex:
+            print("[oidc] id_token verify failed:", ex, flush=True)
             raise HTTPException(401, "Invalid Google identity token")
         except HTTPException:
             raise
