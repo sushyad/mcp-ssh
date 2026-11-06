@@ -1,0 +1,6 @@
+{
+  "logins": {
+    "you@example.com": "cluster-admin",
+    "colleague-readonly@example.com": "readonly-user"
+  }
+}
