@@ -72,3 +72,7 @@ dmypy.json
 
 
 
+config/google_logins.json
+*.bak_*
+tmp_import_2/
+config/oauth

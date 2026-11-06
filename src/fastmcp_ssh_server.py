@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 from pydantic import AnyHttpUrl
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
@@ -153,6 +153,27 @@ def create_ssh_fastmcp() -> FastMCP:
 
     oauth_provider = SSHMcpOAuthProvider(auth_callback_url=f"{base}/login", mcp_scope=MCP_SCOPE)
 
+    async def _auto_login_from_forwarded_user(request: Request, state: str) -> Response | None:
+        """When Traefik forward-auth has Google-authenticated the browser leg, it sends
+        X-Forwarded-User (the verified email). If that email maps to a token, complete the
+        login silently so the human never pastes an API token."""
+        email = request.headers.get("x-forwarded-user")
+        if not email:
+            return None
+        cfg = get_config()
+        token = cfg.token_for_email(email)
+        if not token:
+            logger.warning(f'Forwarded Google user {email!r} has no token mapping; showing manual form')
+            return None
+        try:
+            redirect_url = await oauth_provider._complete_login(token, state)
+        except Exception:
+            logger.exception('Auto-login failed for forwarded user')
+            return None
+        logger.info(f'Auto-completed OAuth login for Google user {email!r}')
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+
     mcp = FastMCP(
         name="mcp-ssh-server",
         instructions=(
@@ -182,6 +203,20 @@ def create_ssh_fastmcp() -> FastMCP:
         state = request.query_params.get("state")
         if not state:
             return JSONResponse({"error": "missing state"}, status_code=400)
+        auto = await _auto_login_from_forwarded_user(request, state)
+        if auto is not None:
+            return auto
+        return await oauth_provider.get_login_page(state)
+
+    @mcp.custom_route("/login/{state}", methods=["GET"])
+    async def oauth_login_page_path(request: Request) -> Response:
+        """Path-based login leg; survives Google forward-auth which drops query strings."""
+        state = request.path_params.get("state")
+        if not state:
+            return JSONResponse({"error": "missing state"}, status_code=400)
+        auto = await _auto_login_from_forwarded_user(request, state)
+        if auto is not None:
+            return auto
         return await oauth_provider.get_login_page(state)
 
     @mcp.custom_route("/login/callback", methods=["POST"])

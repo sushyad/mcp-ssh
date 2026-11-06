@@ -72,12 +72,16 @@ class Config:
         self.config_dir = Path(config_dir or os.getenv('CONFIG_DIR', './config'))
         self.servers: Dict[str, ServerConfig] = {}
         self.tokens: Dict[str, TokenConfig] = {}
+        self.google_logins: Dict[str, str] = {}
         self.security: SecurityConfig = SecurityConfig()
         self._servers_lock = threading.Lock()
         self._servers_file_mtime: float = 0.0
+        self._tokens_lock = threading.Lock()
+        self._tokens_file_mtime: float = 0.0
         
         self._load_servers()
         self._load_tokens()
+        self._load_google_logins()
     
     def _load_servers(self):
         """Load servers configuration from JSON file."""
@@ -166,7 +170,26 @@ class Config:
             
         except Exception as e:
             logger.error(f"Error loading tokens config: {e}")
+        finally:
+            try:
+                self._tokens_file_mtime = tokens_file.stat().st_mtime
+            except OSError:
+                pass
     
+    def _reload_tokens_if_changed(self):
+        """Reload tokens from disk if tokens.json was modified (e.g. by CLI revoke)."""
+        tokens_file = self.config_dir / 'tokens.json'
+        if not tokens_file.exists():
+            return
+        try:
+            mtime = tokens_file.stat().st_mtime
+            if mtime > self._tokens_file_mtime:
+                with self._tokens_lock:
+                    if mtime > self._tokens_file_mtime:
+                        self._load_tokens()
+        except OSError:
+            pass
+
     def save_servers(self):
         """Save servers configuration to JSON file."""
         servers_file = self.config_dir / 'servers.json'
@@ -265,11 +288,43 @@ class Config:
     
     def validate_token(self, token: str) -> Optional[TokenConfig]:
         """Validate token and return config if valid."""
+        self._reload_tokens_if_changed()
         config = self.tokens.get(token)
         if config and config.enabled:
             return config
         return None
     
+    def _load_google_logins(self):
+        """Load email -> token-name map for Google forward-auth auto-login."""
+        gl_file = self.config_dir / 'google_logins.json'
+        if not gl_file.exists():
+            logger.info('No google_logins.json found; Google-identity auto-login disabled')
+            return
+        try:
+            with open(gl_file, 'r') as f:
+                data = json.load(f)
+            logins = data.get('logins', {})
+            for email, name in logins.items():
+                if isinstance(email, str) and isinstance(name, str):
+                    self.google_logins[email.strip().lower()] = name.strip()
+            logger.info(f'Loaded {len(self.google_logins)} Google login mappings')
+        except Exception as e:
+            logger.error(f'Error loading google_logins.json: {e}')
+
+    def token_for_email(self, email: str) -> Optional[str]:
+        """Return the API token string for a trusted Google email, else None."""
+        self._reload_tokens_if_changed()
+        if not email:
+            return None
+        name = self.google_logins.get(email.strip().lower())
+        if not name:
+            return None
+        for token, tc in self.tokens.items():
+            if tc.name == name and tc.enabled:
+                return token
+        logger.warning(f'Google login maps {email!r} to unknown/disabled token {name!r}')
+        return None
+
     def add_token(self, token: str, config: TokenConfig):
         """Add a new token."""
         self.tokens[token] = config

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import secrets
 import time
+from html import escape as html_escape
+from urllib.parse import quote
 from typing import Any
 
 from pydantic import AnyHttpUrl
@@ -62,7 +64,7 @@ class SSHMcpOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
             "client_id": client.client_id,
             "resource": params.resource,
         }
-        return f"{self.auth_callback_url}?state={state}&client_id={client.client_id}"
+        return f"{self.auth_callback_url}/{quote(state, safe='')}"
 
     async def get_login_page(self, state: str) -> HTMLResponse:
         if not state:
@@ -79,7 +81,7 @@ p.note {{ color: #555; font-size: 0.9rem; }}
 <h1>MCP SSH Server</h1>
 <p>Enter the API token from <code>python -m src.cli token create</code> (same as Bearer for Cursor).</p>
 <form method="post" action="/login/callback">
-  <input type="hidden" name="state" value="{state}" />
+  <input type="hidden" name="state" value="{html_escape(state, quote=True)}" />
   <label for="api_token">API token</label>
   <input id="api_token" name="api_token" type="password" autocomplete="off" required />
   <button type="submit">Continue</button>
