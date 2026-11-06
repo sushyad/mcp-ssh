@@ -223,6 +223,10 @@ def create_ssh_fastmcp() -> FastMCP:
     async def oauth_login_callback(request: Request) -> Response:
         return await oauth_provider.handle_login_callback(request)
 
+    @mcp.custom_route("/login/google/callback", methods=["GET"])
+    async def oauth_google_callback(request: Request) -> Response:
+        return await oauth_provider.handle_google_callback(request)
+
     _register_ssh_tools(mcp, _token_config_from_context)
     return mcp
 
